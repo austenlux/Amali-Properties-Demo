@@ -1,0 +1,6 @@
+# Accepted risk: uuid@7.0.3 (GHSA-w5hq-g745-h8pq) is build-time-only, deep in
+# Expo's own tooling (expo-splash-screen > @expo/config-plugins > xcode > uuid).
+# Not shipped in the app, not runtime-reachable. Prototype, not production.
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+reason = "build-time-only transitive (xcode pkg), no runtime exposure; prototype"
