@@ -90,7 +90,7 @@ const CAUSTIC_COLOR = [0.4196, 0.8235, 1.0] as const;
 
 /** Faint caustic light strength. VERY subtle — ambient pool shimmer, not a
  *  light show. Reference keeps the caustic itself faint under a 0.74 mix. */
-const CAUSTIC_STRENGTH = 0.1;
+const CAUSTIC_STRENGTH = 0.6;
 
 /** Spatial frequency of the caustic field (roughly cycles across screen width).
  *  Higher = smaller, busier cells. Reference scales uv up by ~16 * 0.446. */
@@ -108,7 +108,7 @@ const DOMAIN_WARP_STRENGTH = 0.35;
  *  spatially-varying "pool surface swaying" idle motion. Because it's the noise
  *  gradient, it differs everywhere and drifts with time (unlike a global sine).
  *  Added to the refraction offset only, so it never triggers choppy blur. */
-const AMBIENT_DISTORTION_PX = 6.0;
+const AMBIENT_DISTORTION_PX = 25.0;
 
 // --- Background image rotation ---------------------------------------------
 
