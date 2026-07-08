@@ -176,7 +176,7 @@ const TAB_FADE_MS = 400;
 /** The translucent pill behind the slide labels. A dark scrim (rather than the
  *  reference's white/5 + backdrop-blur, which RN can't do without a blur dep)
  *  so the pill stays visible over bright AND dark images. */
-const PILL_BG = 'rgba(0,0,0,0.3)';
+const PILL_BG = 'rgba(0,0,0,0.45)';
 const PILL_RADIUS = 10;
 const PILL_PADDING_H = 12;
 /** Tall vertical padding gives the pill its height. */
@@ -815,5 +815,10 @@ const styles = StyleSheet.create({
     fontSize: BAR_FONT_SIZE,
     letterSpacing: BAR_LETTER_SPACING,
     fontWeight: '400',
+    // Dark halo so the (backgroundless) DISCOVER/LIVING and the tab labels stay
+    // legible over bright image areas.
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
 });
