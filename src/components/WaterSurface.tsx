@@ -846,6 +846,11 @@ const styles = StyleSheet.create({
     // platform default sans-serif at weight '300' stands in for it here.
     fontWeight: '300',
     textAlign: 'center',
+    // Dark halo so the headline stays readable over bright image areas (same
+    // approach as the bottom bar labels).
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
   },
   // Bottom "DISCOVER [tabs] LIVING" bar — centered horizontally.
   bottomBar: {
