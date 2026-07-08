@@ -280,13 +280,27 @@ float vnoise(float3 x) {
   return mix(nxy0, nxy1, f.z);
 }
 
-// Sample the noise and its xy gradient (time held fixed) via forward
-// differences. Returns float3(dValue/dx, dValue/dy, value). 3 noise taps.
+// Two-octave fractal value noise: the second octave is rotated off-axis and
+// higher frequency so the base cubic lattice never reads as square/diamond
+// cells — the shapes come out organic and random.
+float fnoise(float3 x) {
+  float v = vnoise(x);
+  float3 x2 = float3(
+    x.x * 0.5403 - x.y * 0.8415,
+    x.x * 0.8415 + x.y * 0.5403,
+    x.z
+  ) * 2.03 + 11.5;
+  v += 0.5 * vnoise(x2);
+  return v / 1.5; // normalize back to ~0..1
+}
+
+// Sample the fractal noise and its xy gradient (time held fixed) via forward
+// differences. Returns float3(dValue/dx, dValue/dy, value).
 float3 noiseGrad(float3 p) {
   const float e = 0.06; // finite-difference step in noise space
-  float c = vnoise(p);
-  float nx = vnoise(p + float3(e, 0.0, 0.0));
-  float ny = vnoise(p + float3(0.0, e, 0.0));
+  float c = fnoise(p);
+  float nx = fnoise(p + float3(e, 0.0, 0.0));
+  float ny = fnoise(p + float3(0.0, e, 0.0));
   return float3((nx - c) / e, (ny - c) / e, c);
 }
 
