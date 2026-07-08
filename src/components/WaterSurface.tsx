@@ -700,7 +700,7 @@ export function WaterSurface() {
   // Faint wash sweeping left->right across the pill as the current slide
   // progresses; the hard reset to 0 at each slide change comes from the worklet.
   const sweepStyle = useAnimatedStyle(() => ({
-    width: `${slideProgress.value * 100}%`,
+    transform: [{ scaleX: slideProgress.value }],
   }));
 
   // Per-tab opacity: the active slide's label is full white, the other two fade.
@@ -879,7 +879,11 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     left: 0,
+    right: 0,
     backgroundColor: PILL_SWEEP_BG,
+    // Fill from the left edge; scaleX (driven by slideProgress) reveals it to
+    // the true right edge regardless of any padding.
+    transformOrigin: 'left',
   },
   tab: {
     paddingVertical: TAB_PADDING_V,
