@@ -79,29 +79,36 @@ const TINT_COLOR = [0.0, 0.427, 0.827] as const;
 /** Overall tint strength. Kept low — most of it lands on disturbed water. */
 const TINT_STRENGTH = 0.06;
 
-// --- Ambient caustics shimmer (always on, even with no touch) --------------
+// --- Ambient pool caustics + surface sway (always on, even with no touch) --
+// ONE animated 3D noise field drives BOTH effects, mirroring the reference:
+// its scalar value -> the faint caustic light, its gradient -> the gentle,
+// spatially-varying surface warp. Domain warping (re-sampling offset by the
+// previous sample's gradient) folds smooth noise into the caustic "web".
 
 /** Caustic light colour (reference caustic tint ≈ 0.42, 0.82, 1.0). */
 const CAUSTIC_COLOR = [0.4196, 0.8235, 1.0] as const;
 
-/** Caustic brightness. SUBTLE — this is an ambient breeze, not a light show. */
-const CAUSTIC_STRENGTH = 0.12;
+/** Faint caustic light strength. VERY subtle — ambient pool shimmer, not a
+ *  light show. Reference keeps the caustic itself faint under a 0.74 mix. */
+const CAUSTIC_STRENGTH = 0.1;
 
-/** Spatial frequency of the caustic noise (cells across the screen width). */
+/** Spatial frequency of the caustic field (roughly cycles across screen width).
+ *  Higher = smaller, busier cells. Reference scales uv up by ~16 * 0.446. */
 const CAUSTIC_SCALE = 3.5;
 
-/** Drift speed of the caustic field. Reference feeds `uTime * 0.25`. */
+/** Drift speed of the field through time. Reference feeds `uTime * 0.25`. */
 const CAUSTIC_SPEED = 0.25;
 
-// --- Ambient surface motion (always on, even with no touch) ----------------
+/** Domain-warp strength: how far the previous sample's gradient displaces the
+ *  next sample point (in noise-space units). This folding is what turns smooth
+ *  noise into the interconnected caustic web. Reference folds twice. */
+const DOMAIN_WARP_STRENGTH = 0.35;
 
-/** Peak screen-px the image gently warps on its own — the "gentle breeze on
- *  the water" idle motion. A few drifting sine waves, independent of ripples,
- *  so the surface is always subtly alive. Keep it small and calm. */
-const AMBIENT_STRENGTH = 4.0;
-
-/** Drift speed of the ambient motion. Higher = busier; keep it slow/gentle. */
-const AMBIENT_SPEED = 0.5;
+/** Peak screen-px the field gradient warps the image on its own — the gentle,
+ *  spatially-varying "pool surface swaying" idle motion. Because it's the noise
+ *  gradient, it differs everywhere and drifts with time (unlike a global sine).
+ *  Added to the refraction offset only, so it never triggers choppy blur. */
+const AMBIENT_DISTORTION_PX = 6.0;
 
 // --- Background image rotation ---------------------------------------------
 
@@ -139,8 +146,8 @@ uniform float causticStrength;
 uniform float causticScale;
 uniform float causticSpeed;
 uniform float3 causticColor;
-uniform float ambientStrength; // px of always-on gentle surface warp
-uniform float ambientSpeed;    // drift speed of the ambient motion
+uniform float domainWarp;       // domain-warp fold strength (noise-space units)
+uniform float ambientDistortion; // px of always-on spatially-varying surface warp
 uniform float fade;        // 0..1 crossfade current -> next
 uniform float uTime;       // seconds, drives caustic drift + ambient motion
 
@@ -158,7 +165,11 @@ half4 bg(float2 p) {
   return c;
 }
 
-// --- Cheap 3D value noise (2 octaves) for the caustic shimmer -------------
+// --- Cheap 3D value noise; scalar value + gradient via finite differences --
+// The reference uses an analytic-derivative BCC noise (vec4: xyz = gradient,
+// w = value). We don't need that beast: a cheap value noise plus a
+// finite-difference gradient reproduces the same "value + gradient" field the
+// domain warping and the two ambient effects need.
 float hash13(float3 p) {
   p = fract(p * 0.1031);
   p += dot(p, p.yzx + 33.33);
@@ -186,10 +197,28 @@ float vnoise(float3 x) {
   return mix(nxy0, nxy1, f.z);
 }
 
-float fbm(float3 p) {
-  float v = 0.5 * vnoise(p);
-  v += 0.25 * vnoise(p * 2.0);
-  return v / 0.75; // normalize back to ~0..1
+// Sample the noise and its xy gradient (time held fixed) via forward
+// differences. Returns float3(dValue/dx, dValue/dy, value). 3 noise taps.
+float3 noiseGrad(float3 p) {
+  const float e = 0.06; // finite-difference step in noise space
+  float c = vnoise(p);
+  float nx = vnoise(p + float3(e, 0.0, 0.0));
+  float ny = vnoise(p + float3(0.0, e, 0.0));
+  return float3((nx - c) / e, (ny - c) / e, c);
+}
+
+// Animated caustic field with two domain-warp folds (matches the reference's
+// base -> balance -> final re-sampling). Each fold offsets the sample point by
+// the previous sample's gradient, folding smooth noise into the caustic web.
+// Returns float3(gradient.x, gradient.y, value). 9 noise taps total.
+float3 causticField(float2 aspectUv) {
+  float3 p = float3(aspectUv * causticScale, uTime * causticSpeed);
+  float3 n = noiseGrad(p);
+  p.xy -= n.xy * domainWarp;      // fold 1 (like balanceNoise)
+  n = noiseGrad(p);
+  p.xy -= n.xy * domainWarp;      // fold 2 (like final noise)
+  n = noiseGrad(p);
+  return n;
 }
 
 half4 main(float2 xy) {
@@ -203,15 +232,17 @@ half4 main(float2 xy) {
   float hD = sampleH(g + float2(0.0, 1.0));
   float2 grad = float2(hR - hL, hD - hU);
 
-  // Ambient gentle motion — always on, even with no touch. A few incommensurate
-  // sine waves drifting over time nudge the sample point like a soft breeze on
-  // the surface. Added to the refraction offset only (NOT into grad), so it
-  // warps the image without triggering the choppy-water blur/darkening.
-  float at = uTime * ambientSpeed;
-  float2 amb = float2(
-    sin(uv.y * 7.0 + at) + 0.6 * sin(uv.x * 5.0 - at * 0.8),
-    cos(uv.x * 6.0 + at * 0.9) + 0.6 * cos(uv.y * 4.5 - at * 0.7)
-  ) * ambientStrength;
+  // Animated caustic field, evaluated once. Its gradient drives the ambient
+  // surface sway; its scalar value drives the faint caustic light below.
+  float2 aspectUv = float2(uv.x * (resolution.x / resolution.y), uv.y);
+  float3 field = causticField(aspectUv);
+
+  // Ambient surface sway — always on, even with no touch. It's the noise
+  // gradient, so it's spatially varying (different regions warp in different
+  // directions) and drifts with time, like a pool surface very gently swaying.
+  // Added to the refraction offset only (NOT into grad), so it warps the image
+  // without triggering the choppy-water blur/darkening.
+  float2 amb = field.xy * ambientDistortion;
 
   float2 sampleXY = xy + grad * refraction + amb;
   float disturb = clamp(length(grad) * 8.0, 0.0, 1.0);
@@ -242,13 +273,12 @@ half4 main(float2 xy) {
     col = bg(sampleXY);
   }
 
-  // Ambient caustics: slow-drifting 3D noise, screen-blended in caustic color.
-  float2 aspectUv = float2(uv.x * (resolution.x / resolution.y), uv.y);
-  float3 np = float3(aspectUv * causticScale, uTime * causticSpeed);
-  float n = fbm(np);
-  n = pow(clamp(n, 0.0, 1.0), 2.0);
-  half3 caustic = half3(causticColor) * half(n * causticStrength);
-  col.rgb = half3(1.0) - (half3(1.0) - col.rgb) * (half3(1.0) - caustic);
+  // Faint pool caustics: the field's scalar value, sharpened with pow(.,2)
+  // (matching the reference's normalized = pow(0.5 + 0.5*noise.w, 2.0)), then
+  // screen-blended in the caustic colour. Kept VERY subtle — ambient shimmer.
+  float caustic = pow(clamp(field.z, 0.0, 1.0), 2.0);
+  half3 causticCol = half3(causticColor) * half(caustic * causticStrength);
+  col.rgb = half3(1.0) - (half3(1.0) - col.rgb) * (half3(1.0) - causticCol);
 
   // Specular glint from slopes facing a virtual top-left light.
   float spec = clamp((-grad.x - grad.y) * 0.5, 0.0, 1.0);
@@ -351,8 +381,8 @@ export function WaterSurface() {
     causticScale: CAUSTIC_SCALE,
     causticSpeed: CAUSTIC_SPEED,
     causticColor: CAUSTIC_COLOR as unknown as number[],
-    ambientStrength: AMBIENT_STRENGTH,
-    ambientSpeed: AMBIENT_SPEED,
+    domainWarp: DOMAIN_WARP_STRENGTH,
+    ambientDistortion: AMBIENT_DISTORTION_PX,
     fade: 0,
     uTime: 0,
   });
@@ -441,8 +471,8 @@ export function WaterSurface() {
       causticScale: CAUSTIC_SCALE,
       causticSpeed: CAUSTIC_SPEED,
       causticColor: CAUSTIC_COLOR as unknown as number[],
-      ambientStrength: AMBIENT_STRENGTH,
-      ambientSpeed: AMBIENT_SPEED,
+      domainWarp: DOMAIN_WARP_STRENGTH,
+      ambientDistortion: AMBIENT_DISTORTION_PX,
       fade: fadeValue,
       uTime: tms / 1000,
     };
