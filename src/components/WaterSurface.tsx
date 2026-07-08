@@ -5,10 +5,13 @@ import {
   Fill,
   FilterMode,
   ImageShader,
+  LinearGradient,
   MipmapMode,
+  Rect,
   Shader,
   Skia,
   useImage,
+  vec,
   type SkImage,
 } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useRef } from 'react';
@@ -116,6 +119,13 @@ const DOMAIN_WARP_STRENGTH = 0.35;
  *  Added to the refraction offset only, so it never triggers choppy blur. */
 const AMBIENT_DISTORTION_PX = 25.0;
 
+/** Barely-visible bright rim traced along the edges of each ambient distortion
+ *  shape — the thin caustic "veins" you see on a pool surface. Derived from the
+ *  field gradient (largest at shape boundaries). */
+const EDGE_GAIN = 1.6;      // maps gradient magnitude toward the rim
+const EDGE_SHARP = 2.0;     // higher = thinner, crisper rim lines
+const EDGE_STRENGTH = 0.16; // brightness of the rim (keep it a whisper)
+
 // --- Background image rotation ---------------------------------------------
 
 /** How long the very first image holds before the first crossfade (ms). */
@@ -185,6 +195,12 @@ const TAB_PADDING_H = 12;
 /** The faint wash that sweeps across the pill as the slide progresses. */
 const PILL_SWEEP_BG = 'rgba(255,255,255,0.10)';
 
+/** Bottom gradient scrim (transparent at top -> dark at the very bottom) so the
+ *  whole bar stays legible over any image, bright or busy. Rendered with Skia
+ *  (no extra dependency). */
+const SCRIM_HEIGHT = 260;
+const SCRIM_COLOR = 'rgba(0,0,0,0.6)';
+
 // ---------------------------------------------------------------------------
 // SkSL runtime shader.
 // Child 0 = current background, child 1 = next background (cover-fit),
@@ -212,6 +228,9 @@ uniform float causticSpeed;
 uniform float3 causticColor;
 uniform float domainWarp;       // domain-warp fold strength (noise-space units)
 uniform float ambientDistortion; // px of always-on spatially-varying surface warp
+uniform float edgeGain;      // maps field gradient magnitude toward the rim
+uniform float edgeSharp;     // sharpness (thinness) of the caustic edge rim
+uniform float edgeStrength;  // brightness of the caustic edge rim
 uniform float fade;        // 0..1 crossfade current -> next
 uniform float uTime;       // seconds, drives caustic drift + ambient motion
 
@@ -344,6 +363,12 @@ half4 main(float2 xy) {
   half3 causticCol = half3(causticColor) * half(caustic * causticStrength);
   col.rgb = half3(1.0) - (half3(1.0) - col.rgb) * (half3(1.0) - causticCol);
 
+  // Barely-visible bright rim on the edges of each ambient distortion shape.
+  // The field gradient is largest at the shape boundaries, so |field.xy| traces
+  // the edges; sharpen it into thin veins and add a whisper of white.
+  float ambEdge = pow(clamp(length(field.xy) * edgeGain, 0.0, 1.0), edgeSharp);
+  col.rgb += half3(ambEdge * edgeStrength);
+
   // Specular glint from slopes facing a virtual top-left light.
   float spec = clamp((-grad.x - grad.y) * 0.5, 0.0, 1.0);
   col.rgb += half3(spec * lighting);
@@ -455,6 +480,9 @@ export function WaterSurface() {
     causticColor: CAUSTIC_COLOR as unknown as number[],
     domainWarp: DOMAIN_WARP_STRENGTH,
     ambientDistortion: AMBIENT_DISTORTION_PX,
+    edgeGain: EDGE_GAIN,
+    edgeSharp: EDGE_SHARP,
+    edgeStrength: EDGE_STRENGTH,
     fade: 0,
     uTime: 0,
   });
@@ -553,6 +581,9 @@ export function WaterSurface() {
       causticColor: CAUSTIC_COLOR as unknown as number[],
       domainWarp: DOMAIN_WARP_STRENGTH,
       ambientDistortion: AMBIENT_DISTORTION_PX,
+      edgeGain: EDGE_GAIN,
+      edgeSharp: EDGE_SHARP,
+      edgeStrength: EDGE_STRENGTH,
       fade: fadeValue,
       uTime: tms / 1000,
     };
@@ -710,6 +741,17 @@ export function WaterSurface() {
           never distorts them. pointerEvents="none" lets the finger disturb the
           water everywhere, including under the text. */}
       <View style={styles.overlay} pointerEvents="none">
+        {/* Bottom gradient scrim (Skia) so the bar reads over any image. */}
+        <Canvas style={styles.scrim}>
+          <Rect x={0} y={0} width={width} height={SCRIM_HEIGHT}>
+            <LinearGradient
+              start={vec(0, 0)}
+              end={vec(0, SCRIM_HEIGHT)}
+              colors={['transparent', SCRIM_COLOR]}
+            />
+          </Rect>
+        </Canvas>
+
         {/* Overlay 1: centered hero headline. */}
         <View style={styles.heroWrap}>
           <Text style={styles.hero}>
@@ -756,6 +798,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  // Bottom gradient scrim behind the bar.
+  scrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: SCRIM_HEIGHT,
   },
   // Hero headline — vertically & horizontally centered on the screen.
   heroWrap: {
