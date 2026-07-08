@@ -118,14 +118,14 @@ const DOMAIN_WARP_STRENGTH = 0.55;
  *  spatially-varying "pool surface swaying" idle motion. Because it's the noise
  *  gradient, it differs everywhere and drifts with time (unlike a global sine).
  *  Added to the refraction offset only, so it never triggers choppy blur. */
-const AMBIENT_DISTORTION_PX = 25.0;
+const AMBIENT_DISTORTION_PX = 12.0;
 
 /** Barely-visible bright rim traced along the edges of each ambient distortion
  *  shape — the thin caustic "veins" you see on a pool surface. Derived from the
  *  field gradient (largest at shape boundaries). */
 const EDGE_GAIN = 1.6;      // maps gradient magnitude toward the rim
 const EDGE_SHARP = 2.0;     // higher = thinner, crisper rim lines
-const EDGE_STRENGTH = 0.22; // brightness of the rim
+const EDGE_STRENGTH = 0.12; // brightness of the rim
 
 // --- Background image rotation ---------------------------------------------
 
