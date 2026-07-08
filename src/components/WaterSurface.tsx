@@ -103,7 +103,7 @@ const CAUSTIC_STRENGTH = 0.6;
 
 /** Spatial frequency of the caustic field (roughly cycles across screen width).
  *  Higher = smaller, busier cells. Reference scales uv up by ~16 * 0.446. */
-const CAUSTIC_SCALE = 5.5;
+const CAUSTIC_SCALE = 11.0;
 
 /** Drift speed of the field through time. Reference feeds `uTime * 0.25`. */
 const CAUSTIC_SPEED = 0.25;
