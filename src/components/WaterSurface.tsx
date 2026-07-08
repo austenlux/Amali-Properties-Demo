@@ -103,7 +103,7 @@ const CAUSTIC_STRENGTH = 0.6;
 
 /** Spatial frequency of the caustic field (roughly cycles across screen width).
  *  Higher = smaller, busier cells. Reference scales uv up by ~16 * 0.446. */
-const CAUSTIC_SCALE = 11.0;
+const CAUSTIC_SCALE = 8.0;
 
 /** Drift speed of the field through time. Reference feeds `uTime * 0.25`. */
 const CAUSTIC_SPEED = 0.25;
@@ -125,7 +125,7 @@ const AMBIENT_DISTORTION_PX = 25.0;
  *  field gradient (largest at shape boundaries). */
 const EDGE_GAIN = 1.6;      // maps gradient magnitude toward the rim
 const EDGE_SHARP = 2.0;     // higher = thinner, crisper rim lines
-const EDGE_STRENGTH = 0.32; // brightness of the rim
+const EDGE_STRENGTH = 0.22; // brightness of the rim
 
 // --- Background image rotation ---------------------------------------------
 
