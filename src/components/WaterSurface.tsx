@@ -173,8 +173,10 @@ const BAR_TEXT_COLOR = '#FFFFFF';
 const TAB_INACTIVE_OPACITY = 0.35;
 /** Fade duration when the active tab changes. */
 const TAB_FADE_MS = 400;
-/** The translucent pill behind the slide labels. */
-const PILL_BG = 'rgba(255,255,255,0.08)';
+/** The translucent pill behind the slide labels. A dark scrim (rather than the
+ *  reference's white/5 + backdrop-blur, which RN can't do without a blur dep)
+ *  so the pill stays visible over bright AND dark images. */
+const PILL_BG = 'rgba(0,0,0,0.3)';
 const PILL_RADIUS = 10;
 const PILL_PADDING_H = 12;
 /** Tall vertical padding gives the pill its height. */
