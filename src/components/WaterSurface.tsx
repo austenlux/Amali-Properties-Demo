@@ -188,7 +188,9 @@ const TAB_FADE_MS = 400;
  *  It reads because the bottom gradient scrim darkens the area behind it. */
 const PILL_BG = 'rgba(255,255,255,0.15)';
 const PILL_RADIUS = 10;
-const PILL_PADDING_H = 12;
+const PILL_PADDING_H = 0; // 0 so the progress sweep spans the pill's FULL width
+                          // (an absolute child's 100% is the content box); tab
+                          // padding still provides the inset around the labels.
 /** Tall vertical padding gives the pill its height. */
 const TAB_PADDING_V = 16;
 const TAB_PADDING_H = 12;
