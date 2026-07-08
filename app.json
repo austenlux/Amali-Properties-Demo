@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "WaterSwoosh",
-    "slug": "WaterSwoosh",
+    "name": "Amali Properties Demo",
+    "slug": "amali-properties-demo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "waterswoosh",
+    "scheme": "amalipropertiesdemo",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.austenlux.amalipropertiesdemo"
     },
     "web": {
       "output": "static",
