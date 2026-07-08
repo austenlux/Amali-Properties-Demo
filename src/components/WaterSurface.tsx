@@ -564,7 +564,7 @@ export function WaterSurface() {
       idx = 0;
       const held = tms - FIRST_HOLD_MS;
       fadeValue = held > 0 ? held / CROSSFADE_MS : 0;
-      progressValue = tms / firstSlot;
+      progressValue = Math.min(1, tms / FIRST_HOLD_MS); // full by crossfade start
     } else {
       const cycle = SLIDE_HOLD_MS + CROSSFADE_MS;
       const t = tms - firstSlot;
@@ -572,7 +572,7 @@ export function WaterSurface() {
       const r = t - nCycles * cycle;
       idx = (1 + nCycles) % SLIDE_COUNT;
       fadeValue = r < SLIDE_HOLD_MS ? 0 : (r - SLIDE_HOLD_MS) / CROSSFADE_MS;
-      progressValue = r / cycle; // resets to 0 exactly when idx changes
+      progressValue = Math.min(1, r / SLIDE_HOLD_MS); // full by crossfade start, resets on slide change
     }
 
     slideIndex.value = idx;
