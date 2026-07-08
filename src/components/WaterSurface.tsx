@@ -12,9 +12,15 @@ import {
   type SkImage,
 } from '@shopify/react-native-skia';
 import { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useFrameCallback, useSharedValue } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useFrameCallback,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ---------------------------------------------------------------------------
 // TUNABLE PARAMETERS
@@ -120,6 +126,47 @@ const SLIDE_HOLD_MS = 5000;
 
 /** Crossfade duration between images (ms). */
 const CROSSFADE_MS = 300;
+
+/** Number of hero images / slides in the rotation. */
+const SLIDE_COUNT = 3;
+
+// ---------------------------------------------------------------------------
+// OVERLAY TUNABLES — the hero text + bottom progress bar rendered in the RN
+// view tree ABOVE the Skia <Canvas>, so the water never distorts them.
+// Sizes target a ~1080px-wide phone (Pixel 10 Pro XL); Austen fine-tunes
+// exact px on-device.
+// ---------------------------------------------------------------------------
+
+// --- Overlay 1: centered hero headline -------------------------------------
+
+const HERO_LINE_1 = 'ONE DREAM';
+const HERO_LINE_2 = 'AT A TIME';
+/** Big hero headline size. amaliproperties.com uses "aviano-sans" (a licensed
+ *  commercial font we can't ship) — this uses the platform default sans-serif
+ *  at weight '300' as a visual substitute. */
+const HERO_FONT_SIZE = 48;
+const HERO_LINE_HEIGHT = 60;
+const HERO_LETTER_SPACING = 2;
+const HERO_COLOR = '#FFFFFF';
+
+// --- Overlay 2: bottom progress bar + slide counter ------------------------
+
+/** px the bar sits above the bottom safe-area inset. */
+const BAR_BOTTOM_OFFSET = 30;
+/** px horizontal padding on the bar row. */
+const BAR_H_PADDING = 30;
+/** px gap between the progress track and the counter. */
+const BAR_GAP = 20;
+const TRACK_HEIGHT = 2;
+const TRACK_BG = 'rgba(255,255,255,0.2)';
+const FILL_COLOR = '#FFFFFF';
+const COUNTER_FONT_SIZE = 12;
+const COUNTER_LETTER_SPACING = 1.2;
+/** Height of one digit == the odometer window height (must match lineHeight). */
+const COUNTER_LINE_HEIGHT = 14;
+const COUNTER_COLOR = '#FFFFFF';
+/** Duration of the odometer digit roll when the slide number changes. */
+const DIGIT_ROLL_MS = 300;
 
 // ---------------------------------------------------------------------------
 // SkSL runtime shader.
@@ -346,6 +393,14 @@ export function WaterSurface() {
   const currentImg = useSharedValue<SkImage | null>(flatImage);
   const nextImg = useSharedValue<SkImage | null>(flatImage);
 
+  // Overlay sync: the frame worklet is the sole writer of these two, derived
+  // as a pure function of the same elapsed-time clock that drives the image
+  // rotation, so the overlays never drift from the background. Never written
+  // in an effect / read in a conflicting hook (React Compiler rule) — the
+  // overlays only READ them through useAnimatedStyle on the UI thread.
+  const slideIndex = useSharedValue(0); // active slide, 0..SLIDE_COUNT-1
+  const slideProgress = useSharedValue(0); // 0->1 through the current slide
+
   // Readiness is derived during render (no state, no cascading renders); the
   // effect only publishes the loaded image list to the worklet.
   const ready = !!(img0 && img1 && img2);
@@ -428,32 +483,40 @@ export function WaterSurface() {
     const rgba = buffers.rgba;
 
     // --- 0. Clock + background rotation (pure function of elapsed time).
+    // idx/fadeValue drive the crossfade; slideIndex/slideProgress feed the
+    // overlays. All four come from this one clock so they stay in lockstep.
+    // The first slide holds FIRST_HOLD_MS, the rest SLIDE_HOLD_MS, so slide 0's
+    // slot (and thus its progress fill duration) is longer than the others.
     const tms = frameInfo.timeSinceFirstFrame;
     let fadeValue = 0;
+    let idx = 0;
+    let progressValue = 0;
+
+    const firstSlot = FIRST_HOLD_MS + CROSSFADE_MS;
+    if (tms < firstSlot) {
+      // Slide 0: idx stays 0 through its own crossfade; progress spans the
+      // whole slot (hold + crossfade) so it hits 1 exactly as slide 1 takes over.
+      idx = 0;
+      const held = tms - FIRST_HOLD_MS;
+      fadeValue = held > 0 ? held / CROSSFADE_MS : 0;
+      progressValue = tms / firstSlot;
+    } else {
+      const cycle = SLIDE_HOLD_MS + CROSSFADE_MS;
+      const t = tms - firstSlot;
+      const nCycles = Math.floor(t / cycle);
+      const r = t - nCycles * cycle;
+      idx = (1 + nCycles) % SLIDE_COUNT;
+      fadeValue = r < SLIDE_HOLD_MS ? 0 : (r - SLIDE_HOLD_MS) / CROSSFADE_MS;
+      progressValue = r / cycle; // resets to 0 exactly when idx changes
+    }
+
+    slideIndex.value = idx;
+    slideProgress.value = progressValue;
 
     const imgs = imagesSV.value;
     if (imgs) {
-      const count = imgs.length;
-      let idx = 0;
-      if (tms < FIRST_HOLD_MS) {
-        idx = 0;
-        fadeValue = 0;
-      } else {
-        let t = tms - FIRST_HOLD_MS;
-        if (t < CROSSFADE_MS) {
-          idx = 0;
-          fadeValue = t / CROSSFADE_MS;
-        } else {
-          t -= CROSSFADE_MS;
-          const cycle = SLIDE_HOLD_MS + CROSSFADE_MS;
-          const nCycles = Math.floor(t / cycle);
-          const r = t - nCycles * cycle;
-          idx = (1 + nCycles) % count;
-          fadeValue = r < SLIDE_HOLD_MS ? 0 : (r - SLIDE_HOLD_MS) / CROSSFADE_MS;
-        }
-      }
       currentImg.value = imgs[idx];
-      nextImg.value = imgs[(idx + 1) % count];
+      nextImg.value = imgs[(idx + 1) % imgs.length];
     }
 
     // Refresh the per-frame uniforms (fade + animated caustic clock).
