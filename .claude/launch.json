@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "android", "runtimeExecutable": "npx", "runtimeArgs": ["expo", "run:android", "--device", "58160DLCQ00804"], "port": 8081 }
+  ]
+}

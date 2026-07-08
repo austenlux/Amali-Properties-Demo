@@ -1,0 +1,312 @@
+after mouse stops
+
+      // Visual Effects
+      chromaticDispersion: 0.25,
+      // 25% - Rainbow distortion effect
+      lightingIntensity: 0.21,
+      // 21% - How strong the lighting effect is
+
+      // Color (Blue from your settings)
+      color: {
+        r: 0.0,
+        // Red component (0-1)
+        g: 0.427,
+        // Green component (109/255 ≈ 0.427)
+        b: 0.827 // Blue component (211/255 ≈ 0.827)
+      }
+    };
+
+    // Ping-pong parameters for water physics simulation
+    var pingPongParams = {
+      fragmentShader: waterRipplePingPongShader,
+      vertexShader: vertexShaderNoMatrix,
+      crossorigin: 'Anonymous',
+      texturesOptions: {
+        floatingPoint: 'half-float',
+        premultiplyAlpha: true
+      },
+      uniforms: {
+        uResolution: {
+          name: 'uResolution',
+          type: '2f',
+          value: new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Vec2(1080, 1080)
+        },
+        uMousePos: {
+          name: 'uMousePos',
+          type: '2f',
+          value: new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Vec2(0.5, 0.5)
+        },
+        uPreviousMousePos: {
+          name: 'uPreviousMousePos',
+          type: '2f',
+          value: new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Vec2(0.5, 0.5)
+        },
+        uSpeed: {
+          name: 'uSpeed',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.speed
+        },
+        uScale: {
+          name: 'uScale',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.scale
+        },
+        uDecay: {
+          name: 'uDecay',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.decay
+        },
+        uUvScale: {
+          name: 'uUvScale',
+          type: '2f',
+          value: initialUv.uvScale // Use calculated value
+        },
+        uUvOffset: {
+          name: 'uUvOffset',
+          type: '2f',
+          value: initialUv.uvOffset // Use calculated value
+        }
+      }
+    };
+
+    // Water ripple visual parameters
+    var waterRippleParams = {
+      fragmentShader: waterRippleFragmentShader,
+      vertexShader: vertexShaderNoMatrix,
+      crossorigin: 'Anonymous',
+      depthTest: false,
+      texturesOptions: {
+        floatingPoint: 'half-float',
+        premultiplyAlpha: true
+      },
+      uniforms: {
+        uResolution: {
+          name: 'uResolution',
+          type: '2f',
+          value: new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Vec2(1080)
+        },
+        uScale: {
+          name: 'uScale',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.scale
+        },
+        uTime: {
+          name: 'uTime',
+          type: '1f',
+          value: 0
+        },
+        uStrength: {
+          name: 'uStrength',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.strength
+        },
+        uViscosity: {
+          name: 'uViscosity',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.viscosity
+        },
+        uDispersion: {
+          name: 'uDispersion',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.chromaticDispersion
+        },
+        uLighting: {
+          name: 'uLighting',
+          type: '1f',
+          value: WATER_RIPPLE_SETTINGS.lightingIntensity
+        },
+        uPass: {
+          name: 'uPass',
+          type: '1i',
+          value: 0
+        },
+        uColor: {
+          name: 'uColor',
+          type: '3f',
+          value: new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Vec3(WATER_RIPPLE_SETTINGS.color.r, WATER_RIPPLE_SETTINGS.color.g, WATER_RIPPLE_SETTINGS.color.b)
+        },
+        uUvScale: {
+          name: 'uUvScale',
+          type: '2f',
+          value: initialUv.uvScale // Use calculated value
+        },
+        uUvOffset: {
+          name: 'uUvOffset',
+          type: '2f',
+          value: initialUv.uvOffset // Use calculated value
+        }
+      }
+    };
+
+    // Original final composite shader (UNCHANGED - your working caustics)
+    var originalCausticsFragmentShader = "\n        precision highp float;\n\n        varying vec2 vTextureCoord;\n\n        uniform sampler2D uSampler0;\n        uniform sampler2D uRippleTexture;\n        uniform float uTime;\n        uniform vec2 uMousePosition;\n        uniform vec2 uPreviousMousePos;\n        uniform float uMouseCircleOpacity;\n        uniform float uDebugMode;\n\n        // Exact Unicorn Studio caustics shader code\n        vec4 permute(vec4 t) { return t * (t * 34.0 + 133.0); }\n\n        vec3 grad(float hash) {\n            vec3 cube = mod(floor(hash / vec3(1.0, 2.0, 4.0)), 2.0) * 2.0 - 1.0;\n            vec3 cuboct = cube;\n            float index0 = step(0.0, 1.0 - floor(hash / 16.0));\n            float index1 = step(0.0, floor(hash / 16.0) - 1.0);\n            cuboct.x *= 1.0 - index0;\n            cuboct.y *= 1.0 - index1;\n            cuboct.z *= 1.0 - (1.0 - index0 - index1);\n            float type = mod(floor(hash / 8.0), 2.0);\n            vec3 rhomb = (1.0 - type) * cube + type * (cuboct + cross(cube, cuboct));\n            vec3 grad = cuboct * 1.22474487139 + rhomb;\n            grad *= (1.0 - 0.042942436724648037 * type) * 3.5946317686139184;\n            return grad;\n        }\n\n        vec4 bccNoiseDerivativesPart(vec3 X) {\n            vec3 b = floor(X);\n            vec4 i4 = vec4(X - b, 2.5);\n            vec3 v1 = b + floor(dot(i4, vec4(.25)));\n            vec3 v2 = b + vec3(1, 0, 0) + vec3(-1, 1, 1) * floor(dot(i4, vec4(-.25, .25, .25, .35)));\n            vec3 v3 = b + vec3(0, 1, 0) + vec3(1, -1, 1) * floor(dot(i4, vec4(.25, -.25, .25, .35)));\n            vec3 v4 = b + vec3(0, 0, 1) + vec3(1, 1, -1) * floor(dot(i4, vec4(.25, .25, -.25, .35)));\n            vec4 hashes = permute(mod(vec4(v1.x, v2.x, v3.x, v4.x), 289.0));\n            hashes = permute(mod(hashes + vec4(v1.y, v2.y, v3.y, v4.y), 289.0));\n            hashes = mod(permute(mod(hashes + vec4(v1.z, v2.z, v3.z, v4.z), 289.0)), 48.0);\n            vec3 d1 = X - v1; vec3 d2 = X - v2; vec3 d3 = X - v3; vec3 d4 = X - v4;\n            vec4 a = max(0.75 - vec4(dot(d1, d1), dot(d2, d2), dot(d3, d3), dot(d4, d4)), 0.0);\n            vec4 aa = a * a; vec4 aaaa = aa * aa;\n            vec3 g1 = grad(hashes.x); vec3 g2 = grad(hashes.y); vec3 g3 = grad(hashes.z); vec3 g4 = grad(hashes.w);\n            vec4 extrapolations = vec4(dot(d1, g1), dot(d2, g2), dot(d3, g3), dot(d4, g4));\n            vec3 derivative = -8.0 * (d1 * (aa.x * a.x * extrapolations.x) + d2 * (aa.y * a.y * extrapolations.y) + d3 * (aa.z * a.z * extrapolations.z) + d4 * (aa.w * a.w * extrapolations.w)) + (g1 * aaaa.x + g2 * aaaa.y + g3 * aaaa.z + g4 * aaaa.w);\n            return vec4(derivative, dot(aaaa, extrapolations));\n        }\n\n        vec4 bccNoiseDerivatives_XYBeforeZ(vec3 X) {\n            mat3 orthonormalMap = mat3(\n                0.788675134594813, -0.211324865405187, -0.577350269189626,\n                -0.211324865405187, 0.788675134594813, -0.577350269189626,\n                0.577350269189626, 0.577350269189626, 0.577350269189626\n            );\n            X = orthonormalMap * X;\n            vec4 result = bccNoiseDerivativesPart(X) + bccNoiseDerivativesPart(X + 144.5);\n            return vec4(result.xyz * orthonormalMap, result.w);\n        }\n\n        const float PI = 3.14159265359;\n\n        vec4 normalizeNoise(vec4 noise, float amount) {\n            return mix(noise, (noise + 0.5) * 0.5, amount);\n        }\n\n        mat2 rotate2d(float angle) {\n            return mat2(cos(angle), -sin(angle), sin(angle), cos(angle));\n        }\n\n        vec4 getNoise(vec3 p) {\n            vec4 noise = bccNoiseDerivatives_XYBeforeZ(p);\n            return normalizeNoise(noise, 0.0);\n        }\n\n        vec3 blend(vec3 src, vec3 dst) {\n            return 1.0 - (1.0 - src) * (1.0 - dst);\n        }\n\n        void getCaustics(vec2 uv, out vec4 outNoise, out vec3 outColor) {\n            vec2 aspect = vec2(1.0, 1.0);\n            vec2 mPos = vec2(0.14372822299651566, 0.03765243902439008) + mix(vec2(0), (uMousePosition-0.5), 0.0);\n            float mDist = max(0.0,1.0 - distance(uv * aspect, mPos * aspect) * 4.0 * (1.0 - 0.81));\n\n            uv -= vec2(0.14372822299651566, 0.03765243902439008);\n            uv = uv * aspect * rotate2d(-0.0189 * 2.0 * PI) * vec2(1.0, 1.0) * 16.0 * 0.446;\n\n            float refraction = mix(0.25, 1.3, 0.95);\n            vec3 p = vec3(uv, uTime * 0.25);\n            vec4 noise = getNoise(p);\n            vec4 baseNoise = noise;\n            vec4 balanceNoise = getNoise(p - vec3(baseNoise.xyz / 32.0) * refraction);\n            noise = getNoise(p - vec3(balanceNoise.xyz / 16.0) * refraction);\n\n            float balancer = (0.5 + 0.5 * balanceNoise.w);\n            float normalized = pow(0.5 + 0.5 * noise.w, 2.0);\n            float value = mix(0.0, normalized + 0.2 * (1.0 - normalized), balancer * mDist);\n            outNoise = baseNoise * mDist;\n            outColor = vec3(0.4196078431372549, 0.8235294117647058, 1.0) * value;\n        }\n\n        void main() {\n            vec2 uv = vTextureCoord;\n            \n            // Apply caustics only\n            vec4 causticNoise;\n            vec3 causticColorOut;\n            getCaustics(uv, causticNoise, causticColorOut);\n            \n            // Read ripple data and combine with caustic distortion\n            vec4 rippleData = texture2D(uRippleTexture, uv);\n            float height = rippleData.r;\n            \n            // Debug mode: show ripple data directly\n            if (uDebugMode > 0.5) {\n                vec3 debugColor = vec3(abs(height) * 20.0, abs(rippleData.g) * 100.0, 0.0);\n                gl_FragColor = vec4(clamp(debugColor, 0.0, 1.0), 1.0);\n                return;\n            }\n            \n            // Combine caustic and ripple distortions\n            vec2 rippleDistortion = vec2(height * 0.02);\n            vec2 totalDistortion = causticNoise.xy * 0.01 * 0.25 + rippleDistortion;\n            \n            // Apply chromatic aberration to ripple distortion (simple approach)\n            // Increased strength to make the rainbow effect more visible\n            vec2 chromaticOffset = rippleDistortion * 0.2; // Much stronger chromatic aberration\n            vec4 leftColor = texture2D(uSampler0, uv + totalDistortion - chromaticOffset);\n            vec4 rightColor = texture2D(uSampler0, uv + totalDistortion + chromaticOffset);\n            \n            // Sample with caustic distortion\n            vec4 color = texture2D(uSampler0, uv + totalDistortion);\n            \n            // Apply ripple chromatic aberration (more dramatic effect)\n            if (length(rippleDistortion) > 0.001) {\n                color.r = leftColor.r;\n                color.b = rightColor.b;\n                // Also add some green channel distortion for more rainbow effect\n                color.g = mix(color.g, leftColor.g, 0.3);\n                \n                // Debug: Add a subtle color tint to make chromatic aberration more visible\n                if (uDebugMode > 0.5) {\n                    color.rgb += vec3(0.1, 0.0, 0.1) * length(rippleDistortion) * 10.0; // Red/blue tint\n                }\n            }\n            \n            // Apply existing chromatic aberration system\n            float aspectRatio = 1.0;\n            vec2 mPos = vec2(0.48519163763066203, 0.5111498257839722) + mix(vec2(0), (uMousePosition-0.5), 0.0);\n            vec2 pos = vec2(0.48519163763066203, 0.5111498257839722);\n            \n            float mDist = max(0.0, 1.0 - distance(uv * vec2(aspectRatio, 1.0), mPos * vec2(aspectRatio, 1.0)) * 4.0 * (1.0 - 1.0));\n            vec2 aberrated;\n            vec2 dir = uv - pos;\n            float dist = length(dir);\n            dir = normalize(dir);\n            aberrated = 0.3 * dir * 0.015 * mix(1.0, dist * (1.0 + 0.4), 0.4);\n            aberrated *= mDist;\n\n            float amt = length(aberrated);\n            // Chromatic aberration code - hidden for now but kept for water ripple implementation\n            /*\n            if(amt >= 0.001) {\n                vec4 left = vec4(0.0);\n                vec4 right = vec4(0.0);\n                vec4 center = vec4(0.0);\n                float invSteps = 1.0 / 15.0;\n\n                for (int i = 0; i <= 14; i++) {\n                    float fi = float(i);\n                    vec2 offset = aberrated * (fi * invSteps);\n                    left += texture2D(uSampler0, uv - offset + totalDistortion) * invSteps;\n                    right += texture2D(uSampler0, uv + offset + totalDistortion) * invSteps;\n                }\n\n                for (int i = 0; i <= 14; i++) {\n                    float fi = float(i);\n                    vec2 offset = aberrated * ((fi / 14.0) - 0.5);\n                    center += texture2D(uSampler0, uv + offset + totalDistortion) * invSteps;\n                }\n\n                color.r = left.r;\n                color.g = mix(color.g, center.g, 1.0);\n                color.b = right.b;\n                color.a = max(max(left.a, center.a), right.a);\n            }\n            */\n            \n            // Blend caustics\n            vec3 blended = blend(color.rgb, causticColorOut);\n            color.rgb = mix(color.rgb, blended, 0.74);\n\n            gl_FragColor = color;\n        }\n    ";
+
+    // Create ping-pong plane for water physics simulation (Unicorn Studio approach)
+    var pingPongPlane = new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.PingPongPlane(curtains, bannerImages, pingPongParams);
+
+    // Create render targets for water ripple effect
+    var renderTarget1 = new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.RenderTarget(curtains, {
+      depth: false,
+      clear: false,
+      texturesOptions: {
+        floatingPoint: 'half-float'
+      }
+    });
+    var renderTarget2 = new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.RenderTarget(curtains, {
+      depth: false,
+      clear: false,
+      texturesOptions: {
+        floatingPoint: 'half-float'
+      }
+    });
+
+    // Create Unicorn Studio style multi-pass water ripple
+    var ripplePlanes = [
+    // Pass 0: Draw ripple
+    new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Plane(curtains, bannerImages, _objectSpread(_objectSpread({}, waterRippleParams), {}, {
+      uniforms: _objectSpread(_objectSpread({}, waterRippleParams.uniforms), {}, {
+        uPass: {
+          name: 'uPass',
+          type: '1i',
+          value: 0
+        }
+      }),
+      renderTarget: renderTarget1
+    })),
+    // Pass 1: Horizontal blur
+    new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Plane(curtains, bannerImages, _objectSpread(_objectSpread({}, waterRippleParams), {}, {
+      uniforms: _objectSpread(_objectSpread({}, waterRippleParams.uniforms), {}, {
+        uPass: {
+          name: 'uPass',
+          type: '1i',
+          value: 1
+        }
+      }),
+      renderTarget: renderTarget2
+    })),
+    // Pass 2: Vertical blur
+    new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Plane(curtains, bannerImages, _objectSpread(_objectSpread({}, waterRippleParams), {}, {
+      uniforms: _objectSpread(_objectSpread({}, waterRippleParams.uniforms), {}, {
+        uPass: {
+          name: 'uPass',
+          type: '1i',
+          value: 2
+        }
+      }),
+      renderTarget: renderTarget1
+    })),
+    // Pass 3: Final ripple with refraction
+    new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Plane(curtains, bannerImages, _objectSpread(_objectSpread({}, waterRippleParams), {}, {
+      uniforms: _objectSpread(_objectSpread({}, waterRippleParams.uniforms), {}, {
+        uPass: {
+          name: 'uPass',
+          type: '1i',
+          value: 3
+        }
+      })
+    }))];
+
+    // Clean shader with only caustics and chromatic aberration (BACK TO ORIGINAL)
+    var finalParams = {
+      vertexShader: vertexShaderNoMatrix,
+      fragmentShader: originalCausticsFragmentShader,
+      uniforms: {
+        uTime: {
+          name: 'uTime',
+          type: '1f',
+          value: 0
+        },
+        uMousePosition: {
+          name: 'uMousePosition',
+          type: '2f',
+          value: new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Vec2(0.5, 0.5)
+        },
+        uPreviousMousePos: {
+          name: 'uPreviousMousePos',
+          type: '2f',
+          value: new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Vec2(0.5, 0.5)
+        },
+        uMouseCircleOpacity: {
+          name: 'uMouseCircleOpacity',
+          type: '1f',
+          value: 0.0
+        },
+        uDebugMode: {
+          name: 'uDebugMode',
+          type: '1f',
+          value: 0.0
+        },
+        uUvScale: {
+          name: 'uUvScale',
+          type: '2f',
+          value: initialUv.uvScale // Use calculated value
+        },
+        uUvOffset: {
+          name: 'uUvOffset',
+          type: '2f',
+          value: initialUv.uvOffset // Use calculated value
+        }
+      }
+    };
+    var finalPlane = new curtainsjs__WEBPACK_IMPORTED_MODULE_4__.Plane(curtains, bannerImages, finalParams);
+    currentPlane = finalPlane; // Store reference for slider updates
+
+    // CRITICAL: Manually load sources and wait for them
+    var firstImg = bannerImages.querySelector('img');
+    if (firstImg) {
+      console.log('🔄 Manually loading first image source...');
+      finalPlane.loadSources([firstImg]);
+    }
+
+    // Set up ping-pong texture swapping
+    var currentPingPongTarget = 0;
+
+    // Setup texture references when planes are ready
+    // Set up ping-pong texture references
+    pingPongPlane.onReady(function () {
+      console.log('✅ PingPong plane ready');
+    });
+
+    // Helper function to create texture links (from Unicorn Studio)
+    function createTex(plane, sampler, from) {
+      plane.createTexture({
+        sampler: sampler,
+        premultiplyAlpha: true,
+        fromTexture: from
+      });
+    }
+
+    // Set up ripple planes to receive ping-pong output
+    var setupRippleTextures = function setupRippleTextures() {
+      ripplePlanes.forEach(function (plane, index) {
+        if (plane && pingPongPlane.getTexture()) {
+          // Link ping-pong output to ripple passes using Unicorn Studio method
+          createTex(plane, 'uPingPongTexture', pingPongPlane.getTexture());
+          console.log("\u2705 Ripple plane ".concat(index, " linked to ping-pong output"));
+        }
+      });
+    };
+
+    // Wait for all planes to be ready before linking textures
+    var readyCount = 0;
+    var totalPlanes = ripplePlanes.length;
+    ripplePlanes.forEach(function (plane, index) {
+      plane.onReady(function () {
+        readyCount++;
+        if (readyCount === totalPlanes) {
+          setupRippleTextures();
+          console.log('✅ All ripple planes ready and linked');
+        }
+      });
+    });
+
+    // Link ping-pong output to final plane for visualization
+    finalPlane.onReady(function () {
+      // Show images and canvas together once textures are loaded
+      gsap__WEBPACK_IMPORTED_MODULE_5__["default"].set(bannerImages, {
+        opacity: 1
+      });
+      gsap__WEBPACK_IMPORTED_MODULE_5__["default"].set(waterCanvas, {
+        opacity: 1
+      });
+      if (pingPongP
