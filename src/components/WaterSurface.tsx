@@ -93,6 +93,16 @@ const CAUSTIC_SCALE = 3.5;
 /** Drift speed of the caustic field. Reference feeds `uTime * 0.25`. */
 const CAUSTIC_SPEED = 0.25;
 
+// --- Ambient surface motion (always on, even with no touch) ----------------
+
+/** Peak screen-px the image gently warps on its own — the "gentle breeze on
+ *  the water" idle motion. A few drifting sine waves, independent of ripples,
+ *  so the surface is always subtly alive. Keep it small and calm. */
+const AMBIENT_STRENGTH = 4.0;
+
+/** Drift speed of the ambient motion. Higher = busier; keep it slow/gentle. */
+const AMBIENT_SPEED = 0.5;
+
 // --- Background image rotation ---------------------------------------------
 
 /** How long the very first image holds before the first crossfade (ms). */
@@ -129,8 +139,10 @@ uniform float causticStrength;
 uniform float causticScale;
 uniform float causticSpeed;
 uniform float3 causticColor;
+uniform float ambientStrength; // px of always-on gentle surface warp
+uniform float ambientSpeed;    // drift speed of the ambient motion
 uniform float fade;        // 0..1 crossfade current -> next
-uniform float uTime;       // seconds, drives caustic drift
+uniform float uTime;       // seconds, drives caustic drift + ambient motion
 
 // Decode height stored (biased around 0.5) in the red channel.
 float sampleH(float2 g) {
@@ -191,7 +203,17 @@ half4 main(float2 xy) {
   float hD = sampleH(g + float2(0.0, 1.0));
   float2 grad = float2(hR - hL, hD - hU);
 
-  float2 sampleXY = xy + grad * refraction;
+  // Ambient gentle motion — always on, even with no touch. A few incommensurate
+  // sine waves drifting over time nudge the sample point like a soft breeze on
+  // the surface. Added to the refraction offset only (NOT into grad), so it
+  // warps the image without triggering the choppy-water blur/darkening.
+  float at = uTime * ambientSpeed;
+  float2 amb = float2(
+    sin(uv.y * 7.0 + at) + 0.6 * sin(uv.x * 5.0 - at * 0.8),
+    cos(uv.x * 6.0 + at * 0.9) + 0.6 * cos(uv.y * 4.5 - at * 0.7)
+  ) * ambientStrength;
+
+  float2 sampleXY = xy + grad * refraction + amb;
   float disturb = clamp(length(grad) * 8.0, 0.0, 1.0);
   half hd = half(disturb);
 
@@ -329,6 +351,8 @@ export function WaterSurface() {
     causticScale: CAUSTIC_SCALE,
     causticSpeed: CAUSTIC_SPEED,
     causticColor: CAUSTIC_COLOR as unknown as number[],
+    ambientStrength: AMBIENT_STRENGTH,
+    ambientSpeed: AMBIENT_SPEED,
     fade: 0,
     uTime: 0,
   });
@@ -417,6 +441,8 @@ export function WaterSurface() {
       causticScale: CAUSTIC_SCALE,
       causticSpeed: CAUSTIC_SPEED,
       causticColor: CAUSTIC_COLOR as unknown as number[],
+      ambientStrength: AMBIENT_STRENGTH,
+      ambientSpeed: AMBIENT_SPEED,
       fade: fadeValue,
       uTime: tms / 1000,
     };
