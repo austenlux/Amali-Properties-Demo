@@ -149,24 +149,39 @@ const HERO_LINE_HEIGHT = 60;
 const HERO_LETTER_SPACING = 2;
 const HERO_COLOR = '#FFFFFF';
 
-// --- Overlay 2: bottom progress bar + slide counter ------------------------
+// --- Overlay 2: bottom "DISCOVER [Residences|Island|Villa] LIVING" bar ------
+// Matches amaliproperties.com's desktop hero bar: a translucent rounded pill
+// holding the three slide labels (active = white, the other two faded), flanked
+// by a static "DISCOVER" / "LIVING". A very faint wash sweeps across the pill
+// as the current slide progresses.
+
+/** Static words either side of the pill. Reads "DISCOVER <slide> LIVING". */
+const SIDE_LABEL_LEFT = 'DISCOVER';
+const SIDE_LABEL_RIGHT = 'LIVING';
+/** Slide labels inside the pill — order matches the image rotation. */
+const TAB_LABELS = ['RESIDENCES', 'ISLAND', 'VILLA'] as const;
 
 /** px the bar sits above the bottom safe-area inset. */
-const BAR_BOTTOM_OFFSET = 30;
-/** px horizontal padding on the bar row. */
-const BAR_H_PADDING = 30;
-/** px gap between the progress track and the counter. */
-const BAR_GAP = 20;
-const TRACK_HEIGHT = 2;
-const TRACK_BG = 'rgba(255,255,255,0.2)';
-const FILL_COLOR = '#FFFFFF';
-const COUNTER_FONT_SIZE = 12;
-const COUNTER_LETTER_SPACING = 1.2;
-/** Height of one digit == the odometer window height (must match lineHeight). */
-const COUNTER_LINE_HEIGHT = 14;
-const COUNTER_COLOR = '#FFFFFF';
-/** Duration of the odometer digit roll when the slide number changes. */
-const DIGIT_ROLL_MS = 300;
+const BAR_BOTTOM_OFFSET = 40;
+/** Gap between DISCOVER / pill / LIVING. */
+const BAR_GAP = 14;
+/** Shared text style for every label in the bar. */
+const BAR_FONT_SIZE = 12;
+const BAR_LETTER_SPACING = 1.2;
+const BAR_TEXT_COLOR = '#FFFFFF';
+/** Opacity of the two non-active slide tabs. */
+const TAB_INACTIVE_OPACITY = 0.35;
+/** Fade duration when the active tab changes. */
+const TAB_FADE_MS = 400;
+/** The translucent pill behind the slide labels. */
+const PILL_BG = 'rgba(255,255,255,0.08)';
+const PILL_RADIUS = 10;
+const PILL_PADDING_H = 12;
+/** Tall vertical padding gives the pill its height. */
+const TAB_PADDING_V = 16;
+const TAB_PADDING_H = 12;
+/** The faint wash that sweeps across the pill as the slide progresses. */
+const PILL_SWEEP_BG = 'rgba(255,255,255,0.10)';
 
 // ---------------------------------------------------------------------------
 // SkSL runtime shader.
@@ -625,6 +640,32 @@ export function WaterSurface() {
     }
   });
 
+  const insets = useSafeAreaInsets();
+
+  // Faint wash sweeping left->right across the pill as the current slide
+  // progresses; the hard reset to 0 at each slide change comes from the worklet.
+  const sweepStyle = useAnimatedStyle(() => ({
+    width: `${slideProgress.value * 100}%`,
+  }));
+
+  // Per-tab opacity: the active slide's label is full white, the other two fade.
+  const tab0Style = useAnimatedStyle(() => ({
+    opacity: withTiming(slideIndex.value === 0 ? 1 : TAB_INACTIVE_OPACITY, {
+      duration: TAB_FADE_MS,
+    }),
+  }));
+  const tab1Style = useAnimatedStyle(() => ({
+    opacity: withTiming(slideIndex.value === 1 ? 1 : TAB_INACTIVE_OPACITY, {
+      duration: TAB_FADE_MS,
+    }),
+  }));
+  const tab2Style = useAnimatedStyle(() => ({
+    opacity: withTiming(slideIndex.value === 2 ? 1 : TAB_INACTIVE_OPACITY, {
+      duration: TAB_FADE_MS,
+    }),
+  }));
+  const tabStyles = [tab0Style, tab1Style, tab2Style];
+
   // Wait for all three images to decode and the shader to compile before
   // drawing so the shader never samples a null child.
   if (!ready || !source) {
@@ -632,44 +673,145 @@ export function WaterSurface() {
   }
 
   return (
-    <GestureDetector gesture={pan}>
-      <Canvas style={styles.canvas}>
-        <Fill>
-          <Shader source={source} uniforms={uniforms}>
-            <ImageShader
-              image={currentImg}
-              fit="cover"
-              rect={fullScreenRect}
-              tx="clamp"
-              ty="clamp"
-            />
-            <ImageShader
-              image={nextImg}
-              fit="cover"
-              rect={fullScreenRect}
-              tx="clamp"
-              ty="clamp"
-            />
-            <ImageShader
-              image={heightImage}
-              fit="none"
-              tx="clamp"
-              ty="clamp"
-              sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.None }}
-            />
-          </Shader>
-        </Fill>
-      </Canvas>
-    </GestureDetector>
+    <View style={styles.root}>
+      <GestureDetector gesture={pan}>
+        <Canvas style={styles.canvas}>
+          <Fill>
+            <Shader source={source} uniforms={uniforms}>
+              <ImageShader
+                image={currentImg}
+                fit="cover"
+                rect={fullScreenRect}
+                tx="clamp"
+                ty="clamp"
+              />
+              <ImageShader
+                image={nextImg}
+                fit="cover"
+                rect={fullScreenRect}
+                tx="clamp"
+                ty="clamp"
+              />
+              <ImageShader
+                image={heightImage}
+                fit="none"
+                tx="clamp"
+                ty="clamp"
+                sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.None }}
+              />
+            </Shader>
+          </Fill>
+        </Canvas>
+      </GestureDetector>
+
+      {/* Overlays live in the RN view tree ABOVE the Canvas, so the water shader
+          never distorts them. pointerEvents="none" lets the finger disturb the
+          water everywhere, including under the text. */}
+      <View style={styles.overlay} pointerEvents="none">
+        {/* Overlay 1: centered hero headline. */}
+        <View style={styles.heroWrap}>
+          <Text style={styles.hero}>
+            {HERO_LINE_1}
+            {'\n'}
+            {HERO_LINE_2}
+          </Text>
+        </View>
+
+        {/* Overlay 2: "DISCOVER [Residences|Island|Villa] LIVING" bar. */}
+        <View
+          style={[styles.bottomBar, { bottom: insets.bottom + BAR_BOTTOM_OFFSET }]}
+        >
+          <Text style={styles.barLabel}>{SIDE_LABEL_LEFT}</Text>
+          <View style={styles.pill}>
+            <Animated.View style={[styles.pillSweep, sweepStyle]} />
+            {TAB_LABELS.map((label, i) => (
+              <Animated.View key={label} style={[styles.tab, tabStyles[i]]}>
+                <Text style={styles.barLabel}>{label}</Text>
+              </Animated.View>
+            ))}
+          </View>
+          <Text style={styles.barLabel}>{SIDE_LABEL_RIGHT}</Text>
+        </View>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   canvas: {
     flex: 1,
   },
   placeholder: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  // Hero headline — vertically & horizontally centered on the screen.
+  heroWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hero: {
+    color: HERO_COLOR,
+    fontSize: HERO_FONT_SIZE,
+    lineHeight: HERO_LINE_HEIGHT,
+    letterSpacing: HERO_LETTER_SPACING,
+    // aviano-sans (licensed) is the real font on amaliproperties.com; the
+    // platform default sans-serif at weight '300' stands in for it here.
+    fontWeight: '300',
+    textAlign: 'center',
+  },
+  // Bottom "DISCOVER [tabs] LIVING" bar — centered horizontally.
+  bottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: BAR_GAP,
+  },
+  // Translucent rounded pill holding the three slide tabs.
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: PILL_PADDING_H,
+    backgroundColor: PILL_BG,
+    borderRadius: PILL_RADIUS,
+    overflow: 'hidden',
+  },
+  // Faint wash sweeping left->right across the pill with slide progress.
+  pillSweep: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: PILL_SWEEP_BG,
+  },
+  tab: {
+    paddingVertical: TAB_PADDING_V,
+    paddingHorizontal: TAB_PADDING_H,
+  },
+  // Shared label style. aviano-sans (licensed) on the reference; platform
+  // sans-serif stands in here.
+  barLabel: {
+    color: BAR_TEXT_COLOR,
+    fontSize: BAR_FONT_SIZE,
+    letterSpacing: BAR_LETTER_SPACING,
+    fontWeight: '400',
   },
 });
