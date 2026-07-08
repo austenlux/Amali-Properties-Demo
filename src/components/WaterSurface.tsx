@@ -103,15 +103,16 @@ const CAUSTIC_STRENGTH = 0.6;
 
 /** Spatial frequency of the caustic field (roughly cycles across screen width).
  *  Higher = smaller, busier cells. Reference scales uv up by ~16 * 0.446. */
-const CAUSTIC_SCALE = 3.5;
+const CAUSTIC_SCALE = 5.5;
 
 /** Drift speed of the field through time. Reference feeds `uTime * 0.25`. */
 const CAUSTIC_SPEED = 0.25;
 
 /** Domain-warp strength: how far the previous sample's gradient displaces the
  *  next sample point (in noise-space units). This folding is what turns smooth
- *  noise into the interconnected caustic web. Reference folds twice. */
-const DOMAIN_WARP_STRENGTH = 0.35;
+ *  noise into the interconnected caustic web — more folding = more organic,
+ *  less grid-like. Reference folds twice. */
+const DOMAIN_WARP_STRENGTH = 0.55;
 
 /** Peak screen-px the field gradient warps the image on its own — the gentle,
  *  spatially-varying "pool surface swaying" idle motion. Because it's the noise
@@ -124,7 +125,7 @@ const AMBIENT_DISTORTION_PX = 25.0;
  *  field gradient (largest at shape boundaries). */
 const EDGE_GAIN = 1.6;      // maps gradient magnitude toward the rim
 const EDGE_SHARP = 2.0;     // higher = thinner, crisper rim lines
-const EDGE_STRENGTH = 0.16; // brightness of the rim (keep it a whisper)
+const EDGE_STRENGTH = 0.32; // brightness of the rim
 
 // --- Background image rotation ---------------------------------------------
 
@@ -294,7 +295,13 @@ float3 noiseGrad(float3 p) {
 // the previous sample's gradient, folding smooth noise into the caustic web.
 // Returns float3(gradient.x, gradient.y, value). 9 noise taps total.
 float3 causticField(float2 aspectUv) {
-  float3 p = float3(aspectUv * causticScale, uTime * causticSpeed);
+  // Rotate the sample domain off-axis (~0.5 rad) so the value-noise lattice
+  // doesn't read as regular axis-aligned diamonds.
+  float2 r = float2(
+    aspectUv.x * 0.87758 - aspectUv.y * 0.47943,
+    aspectUv.x * 0.47943 + aspectUv.y * 0.87758
+  );
+  float3 p = float3(r * causticScale, uTime * causticSpeed);
   float3 n = noiseGrad(p);
   p.xy -= n.xy * domainWarp;      // fold 1 (like balanceNoise)
   n = noiseGrad(p);
