@@ -41,3 +41,8 @@ example
 # generated native folders
 /ios
 /android
+
+# build artifacts / local scratch
+*.apk
+.local/
+.playwright-cli/

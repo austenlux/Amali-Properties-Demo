@@ -1,3 +1,10 @@
+/* eslint-disable react-hooks/immutability, react-hooks/refs --
+   This component is built on Reanimated shared values (written in worklets AND
+   in JS gesture/press callbacks) and expo-audio players (settable .loop/.volume
+   props), and reads a ref inside a gesture callback. All are runtime-safe,
+   idiomatic patterns; the React Compiler's experimental immutability/refs lint
+   rules false-flag them, but the compiler (reactCompiler: true) still runs and
+   handles them correctly. Scoped to this file only. */
 import {
   AlphaType,
   Canvas,
@@ -14,10 +21,19 @@ import {
   vec,
   type SkImage,
 } from '@shopify/react-native-skia';
-import { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useAudioPlayer } from 'expo-audio';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  runOnJS,
   useAnimatedStyle,
   useFrameCallback,
   useSharedValue,
@@ -202,6 +218,43 @@ const PILL_SWEEP_BG = 'rgba(255,255,255,0.10)';
  *  (no extra dependency). */
 const SCRIM_HEIGHT = 260;
 const SCRIM_COLOR = 'rgba(0,0,0,0.6)';
+
+// --- Overlay 3: top logo wordmark -------------------------------------------
+// The white transparent "AMÁLI / PROPERTIES" wordmark, centered near the top.
+
+/** Logo width as a fraction of screen width. */
+const LOGO_WIDTH_FRACTION = 0.58;
+/** Wordmark aspect ratio (width : height) ≈ 2.94:1. Drives the fixed height. */
+const LOGO_ASPECT = 2.94;
+/** px below the safe-area top inset the logo (and equalizer) sit. */
+const TOP_OFFSET = 14;
+
+// --- Overlay 4: top-right equalizer play/pause button -----------------------
+// A 40×40 circle framing three vertical bars that bounce like an equalizer
+// while the ambient loop plays, and flatten when paused.
+
+/** Diameter of the circular button. */
+const EQ_BUTTON_SIZE = 40;
+/** px from the right edge. */
+const EQ_RIGHT_OFFSET = 20;
+/** Bar geometry inside the button. */
+const EQ_BAR_WIDTH = 2.5;
+const EQ_BAR_HEIGHT = 12;
+const EQ_BAR_GAP = 6;
+/** scaleY range each bar bounces between while playing / rests at when paused. */
+const EQ_MIN_SCALE = 0.25;
+const EQ_MAX_SCALE = 1.0;
+/** Cadence of the per-bar random bounce (ms) — mirrors the reference's 300ms. */
+const EQ_STEP_MS = 300;
+/** Per-bar period offset so the three bars drift out of phase (uncoordinated). */
+const EQ_STAGGER_MS = 23;
+/** How quickly the bars settle flat when paused (ms). */
+const EQ_FLAT_MS = 200;
+
+// --- Ambient audio ----------------------------------------------------------
+
+/** One-shot UI click volume (0..1). The ambient loop stays at full volume. */
+const CLICK_VOLUME = 0.25;
 
 // ---------------------------------------------------------------------------
 // SkSL runtime shader.
@@ -465,6 +518,20 @@ export function WaterSurface() {
   const slideIndex = useSharedValue(0); // active slide, 0..SLIDE_COUNT-1
   const slideProgress = useSharedValue(0); // 0->1 through the current slide
 
+  // Overridable rotation state (worklet-owned). Instead of deriving the slide
+  // from absolute elapsed time, the worklet tracks the active slide and the
+  // clock at which its hold began, so a tab tap can reset the cycle. All three
+  // are written ONLY inside the frame worklet.
+  const activeIndex = useSharedValue(0); // slide the worklet is currently holding
+  const cycleStartMs = useSharedValue(-1); // tms the current hold began (-1 = seed)
+  const currentHoldMs = useSharedValue(FIRST_HOLD_MS); // hold for the active slide
+
+  // JS -> worklet jump bridge for tab taps. JS sets the requested index; the
+  // worklet consumes it on the next frame and clears it (-1 = nothing pending).
+  // Written from the JS press handler AND cleared in the worklet — never in an
+  // effect, so there's no React-Compiler write conflict and no JS/UI race.
+  const pendingJump = useSharedValue(-1);
+
   // Readiness is derived during render (no state, no cascading renders); the
   // effect only publishes the loaded image list to the worklet.
   const ready = !!(img0 && img1 && img2);
@@ -474,6 +541,98 @@ export function WaterSurface() {
       imagesSV.value = [img0, img1, img2];
     }
   }, [img0, img1, img2, imagesSV]);
+
+  // --- Ambient audio (expo-audio) ------------------------------------------
+  // Two auto-managed players: a looping beach ambience and a one-shot UI click.
+  const beach = useAudioPlayer(require('@/assets/audio/beach-loop.mp3'));
+  const click = useAudioPlayer(require('@/assets/audio/click.mp3'));
+
+  // Configure the players once. `loop`/`volume` are plain settable properties on
+  // the AudioPlayer instance; safe to set before the source finishes loading.
+  useEffect(() => {
+    beach.loop = true;
+    click.volume = CLICK_VOLUME;
+  }, [beach, click]);
+
+  // isPlaying changes only on explicit user action (rarely) — plain React state
+  // is fine here; it is NEVER written per frame.
+  const [isPlaying, setIsPlaying] = useState(false);
+  // The loop is gesture-gated: it starts on the FIRST user interaction only.
+  const hasStartedRef = useRef(false);
+
+  const startAudioIfNeeded = useCallback(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+    beach.play();
+    setIsPlaying(true);
+  }, [beach]);
+
+  // One-shot click: rewind to the start, then play (so rapid taps re-trigger).
+  const playClick = useCallback(() => {
+    click.seekTo(0);
+    click.play();
+  }, [click]);
+
+  // Equalizer button toggles the loop; the very first tap starts it.
+  const toggleAudio = useCallback(() => {
+    if (!hasStartedRef.current) {
+      startAudioIfNeeded();
+      return;
+    }
+    if (isPlaying) {
+      beach.pause();
+      setIsPlaying(false);
+    } else {
+      beach.play();
+      setIsPlaying(true);
+    }
+  }, [beach, isPlaying, startAudioIfNeeded]);
+
+  // Tab tap: request a jump to slide `i`, play the click, and (first time) start
+  // the ambience. The worklet applies the jump on its next frame.
+  const onTabPress = useCallback(
+    (i: number) => {
+      pendingJump.value = i;
+      playClick();
+      startAudioIfNeeded();
+    },
+    [pendingJump, playClick, startAudioIfNeeded],
+  );
+
+  // --- Equalizer bars: three UI-thread scaleY values -----------------------
+  // Written from a JS timer (rare, ~300ms) or the play/pause effect — never
+  // from the frame worklet — and read only in useAnimatedStyle.
+  const bar0 = useSharedValue(EQ_MIN_SCALE);
+  const bar1 = useSharedValue(EQ_MIN_SCALE);
+  const bar2 = useSharedValue(EQ_MIN_SCALE);
+
+  useEffect(() => {
+    const bars = [bar0, bar1, bar2];
+    if (!isPlaying) {
+      // Paused: flatten all three to a short, equal, static height.
+      bars.forEach((b) => {
+        b.value = withTiming(EQ_MIN_SCALE, { duration: EQ_FLAT_MS });
+      });
+      return;
+    }
+    // Playing: each bar animates to a fresh random scaleY on its own cadence.
+    // Slightly different periods (via EQ_STAGGER_MS) drift the bars out of phase
+    // so the bounce reads jittery and uncoordinated, like the reference.
+    const bounce = (b: typeof bar0) => {
+      const target = EQ_MIN_SCALE + Math.random() * (EQ_MAX_SCALE - EQ_MIN_SCALE);
+      b.value = withTiming(target, { duration: EQ_STEP_MS });
+    };
+    const timers = bars.map((b, i) => {
+      bounce(b); // kick immediately so it reacts on tap
+      return setInterval(() => bounce(b), EQ_STEP_MS + i * EQ_STAGGER_MS);
+    });
+    return () => timers.forEach(clearInterval);
+  }, [isPlaying, bar0, bar1, bar2]);
+
+  const bar0Style = useAnimatedStyle(() => ({ transform: [{ scaleY: bar0.value }] }));
+  const bar1Style = useAnimatedStyle(() => ({ transform: [{ scaleY: bar1.value }] }));
+  const bar2Style = useAnimatedStyle(() => ({ transform: [{ scaleY: bar2.value }] }));
+  const barStyles = [bar0Style, bar1Style, bar2Style];
 
   // Touch bridge (gesture worklets -> frame worklet, all on the UI thread).
   const touchX = useSharedValue(0);
@@ -523,6 +682,9 @@ export function WaterSurface() {
       touchX.value = e.x;
       touchY.value = e.y;
       touching.value = 1;
+      // Gesture-gated audio: start the loop on the first water touch. The JS
+      // guard makes every call after the first a no-op.
+      runOnJS(startAudioIfNeeded)();
     })
     .onUpdate((e) => {
       'worklet';
@@ -549,33 +711,52 @@ export function WaterSurface() {
     const previous = buffers.previous;
     const rgba = buffers.rgba;
 
-    // --- 0. Clock + background rotation (pure function of elapsed time).
-    // idx/fadeValue drive the crossfade; slideIndex/slideProgress feed the
-    // overlays. All four come from this one clock so they stay in lockstep.
-    // The first slide holds FIRST_HOLD_MS, the rest SLIDE_HOLD_MS, so slide 0's
-    // slot (and thus its progress fill duration) is longer than the others.
+    // --- 0. Clock + OVERRIDABLE background rotation.
+    // Rather than deriving the slide from absolute elapsed time, the worklet
+    // holds `activeIndex` and `cycleStartMs` (the clock at which the active
+    // slide's hold began) and advances them itself. This makes the rotation
+    // resettable: a tab tap can drop a new index into `cycleStartMs`/activeIndex
+    // via `pendingJump` and the hold restarts cleanly. idx/fadeValue drive the
+    // crossfade; slideIndex/slideProgress feed the overlays — all from this one
+    // clock so they stay in lockstep. The first slide holds FIRST_HOLD_MS, every
+    // slide after (including a tapped one) holds SLIDE_HOLD_MS.
     const tms = frameInfo.timeSinceFirstFrame;
-    let fadeValue = 0;
-    let idx = 0;
-    let progressValue = 0;
 
-    const firstSlot = FIRST_HOLD_MS + CROSSFADE_MS;
-    if (tms < firstSlot) {
-      // Slide 0: idx stays 0 through its own crossfade; progress spans the
-      // whole slot (hold + crossfade) so it hits 1 exactly as slide 1 takes over.
-      idx = 0;
-      const held = tms - FIRST_HOLD_MS;
-      fadeValue = held > 0 ? held / CROSSFADE_MS : 0;
-      progressValue = Math.min(1, tms / FIRST_HOLD_MS); // full by crossfade start
-    } else {
-      const cycle = SLIDE_HOLD_MS + CROSSFADE_MS;
-      const t = tms - firstSlot;
-      const nCycles = Math.floor(t / cycle);
-      const r = t - nCycles * cycle;
-      idx = (1 + nCycles) % SLIDE_COUNT;
-      fadeValue = r < SLIDE_HOLD_MS ? 0 : (r - SLIDE_HOLD_MS) / CROSSFADE_MS;
-      progressValue = Math.min(1, r / SLIDE_HOLD_MS); // full by crossfade start, resets on slide change
+    // Seed the cycle clock on the very first frame.
+    if (cycleStartMs.value < 0) {
+      cycleStartMs.value = tms;
     }
+
+    // Consume a pending tab jump (set from the JS thread): jump to the tapped
+    // slide, restart its hold now, and clear the request.
+    const jump = pendingJump.value;
+    if (jump >= 0) {
+      activeIndex.value = jump;
+      cycleStartMs.value = tms;
+      currentHoldMs.value = SLIDE_HOLD_MS;
+      pendingJump.value = -1;
+    }
+
+    // Advance through any completed slots (usually zero or one per frame). Each
+    // slot is hold + crossfade; after the first slide every hold is SLIDE_HOLD_MS.
+    // Stepping cycleStartMs by whole slots (vs. resetting to tms) avoids drift.
+    let hold = currentHoldMs.value;
+    let slot = hold + CROSSFADE_MS;
+    while (tms - cycleStartMs.value >= slot) {
+      cycleStartMs.value += slot;
+      activeIndex.value = (activeIndex.value + 1) % SLIDE_COUNT;
+      currentHoldMs.value = SLIDE_HOLD_MS;
+      hold = SLIDE_HOLD_MS;
+      slot = hold + CROSSFADE_MS;
+    }
+
+    const idx = activeIndex.value;
+    const elapsedInCycle = tms - cycleStartMs.value;
+    // Progress fills across the hold and hits 1 exactly as the crossfade starts.
+    const progressValue = Math.min(1, elapsedInCycle / hold);
+    // Fade runs only during the trailing CROSSFADE_MS of the slot.
+    const held = elapsedInCycle - hold;
+    const fadeValue = held > 0 ? Math.min(1, held / CROSSFADE_MS) : 0;
 
     slideIndex.value = idx;
     slideProgress.value = progressValue;
@@ -760,11 +941,14 @@ export function WaterSurface() {
       </GestureDetector>
 
       {/* Overlays live in the RN view tree ABOVE the Canvas, so the water shader
-          never distorts them. pointerEvents="none" lets the finger disturb the
-          water everywhere, including under the text. */}
-      <View style={styles.overlay} pointerEvents="none">
+          never distorts them. The wrapper is "box-none": it passes touches
+          through to the water Canvas everywhere EXCEPT on the few interactive
+          controls (the tabs + the equalizer button), which catch their own
+          touches. Every non-interactive child is pointerEvents="none" so drags
+          over them still ripple the water. */}
+      <View style={styles.overlay} pointerEvents="box-none">
         {/* Bottom gradient scrim (Skia) so the bar reads over any image. */}
-        <Canvas style={styles.scrim}>
+        <Canvas style={styles.scrim} pointerEvents="none">
           <Rect x={0} y={0} width={width} height={SCRIM_HEIGHT}>
             <LinearGradient
               start={vec(0, 0)}
@@ -774,8 +958,38 @@ export function WaterSurface() {
           </Rect>
         </Canvas>
 
+        {/* Overlay 3: top logo wordmark — centered, touch-transparent. */}
+        <View
+          style={[styles.logoWrap, { top: insets.top + TOP_OFFSET }]}
+          pointerEvents="none"
+        >
+          <Image
+            source={require('@/assets/images/amali-logo.png')}
+            resizeMode="contain"
+            style={{
+              width: width * LOGO_WIDTH_FRACTION,
+              height: (width * LOGO_WIDTH_FRACTION) / LOGO_ASPECT,
+            }}
+          />
+        </View>
+
+        {/* Overlay 4: top-right equalizer play/pause button — catches touches. */}
+        <Pressable
+          onPress={toggleAudio}
+          style={[
+            styles.eqButton,
+            { top: insets.top + TOP_OFFSET, right: EQ_RIGHT_OFFSET },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={isPlaying ? 'Pause ambient sound' : 'Play ambient sound'}
+        >
+          {barStyles.map((barStyle, i) => (
+            <Animated.View key={i} style={[styles.eqBar, barStyle]} />
+          ))}
+        </Pressable>
+
         {/* Overlay 1: centered hero headline. */}
-        <View style={styles.heroWrap}>
+        <View style={styles.heroWrap} pointerEvents="none">
           <Text style={styles.hero}>
             {HERO_LINE_1}
             {'\n'}
@@ -783,20 +997,29 @@ export function WaterSurface() {
           </Text>
         </View>
 
-        {/* Overlay 2: "DISCOVER [Residences|Island|Villa] LIVING" bar. */}
+        {/* Overlay 2: "DISCOVER [Residences|Island|Villa] LIVING" bar. The bar
+            and pill are "box-none" so the labels/gaps pass touches through; only
+            the tab pressables catch. */}
         <View
           style={[styles.bottomBar, { bottom: insets.bottom + BAR_BOTTOM_OFFSET }]}
+          pointerEvents="box-none"
         >
-          <Text style={styles.barLabel}>{SIDE_LABEL_LEFT}</Text>
-          <View style={styles.pill}>
-            <Animated.View style={[styles.pillSweep, sweepStyle]} />
+          <Text style={styles.barLabel} pointerEvents="none">
+            {SIDE_LABEL_LEFT}
+          </Text>
+          <View style={styles.pill} pointerEvents="box-none">
+            <Animated.View style={[styles.pillSweep, sweepStyle]} pointerEvents="none" />
             {TAB_LABELS.map((label, i) => (
-              <Animated.View key={label} style={[styles.tab, tabStyles[i]]}>
-                <Text style={styles.barLabel}>{label}</Text>
-              </Animated.View>
+              <Pressable key={label} onPress={() => onTabPress(i)} style={styles.tab}>
+                <Animated.View style={tabStyles[i]}>
+                  <Text style={styles.barLabel}>{label}</Text>
+                </Animated.View>
+              </Pressable>
             ))}
           </View>
-          <Text style={styles.barLabel}>{SIDE_LABEL_RIGHT}</Text>
+          <Text style={styles.barLabel} pointerEvents="none">
+            {SIDE_LABEL_RIGHT}
+          </Text>
         </View>
       </View>
     </View>
@@ -828,6 +1051,35 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: SCRIM_HEIGHT,
+  },
+  // Top logo wordmark — horizontally centered, pinned near the top.
+  logoWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  // Circular equalizer play/pause button, top-right.
+  eqButton: {
+    position: 'absolute',
+    width: EQ_BUTTON_SIZE,
+    height: EQ_BUTTON_SIZE,
+    borderRadius: EQ_BUTTON_SIZE / 2,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    backgroundColor: 'transparent',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: EQ_BAR_GAP,
+  },
+  // A single equalizer bar; scaleY is animated and anchored at the bottom.
+  eqBar: {
+    width: EQ_BAR_WIDTH,
+    height: EQ_BAR_HEIGHT,
+    borderRadius: 1,
+    backgroundColor: '#FFFFFF',
+    transformOrigin: 'bottom',
   },
   // Hero headline — vertically & horizontally centered on the screen.
   heroWrap: {
