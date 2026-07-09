@@ -273,9 +273,9 @@ const INTRO_LINE_1 = 'REDEFINING';
 /** Intro headline, line 2. */
 const INTRO_LINE_2 = 'LUXURY LIVING';
 /** How long the fully-blurred intro holds before the transition (ms). */
-const INTRO_HOLD_MS = 600;
+const INTRO_HOLD_MS = 1500;
 /** Ease-out duration for blur->0 + intro-text fade-out + overlays fade-in (ms). */
-const INTRO_FADE_MS = 1800;
+const INTRO_FADE_MS = 2000;
 /** Peak Gaussian blur sigma (px) applied to the rendered water at t=0. */
 const INTRO_MAX_BLUR = 30;
 /** Handoff point (in `intro` units, 1→0) between the two headlines. The intro
