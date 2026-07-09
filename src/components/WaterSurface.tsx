@@ -278,6 +278,11 @@ const INTRO_HOLD_MS = 600;
 const INTRO_FADE_MS = 1800;
 /** Peak Gaussian blur sigma (px) applied to the rendered water at t=0. */
 const INTRO_MAX_BLUR = 30;
+/** Handoff point (in `intro` units, 1→0) between the two headlines. The intro
+ *  text fades out over intro 1→SPLIT, then the experience fades in over
+ *  SPLIT→0 — so "REDEFINING / LUXURY LIVING" and "ONE DREAM / AT A TIME" never
+ *  overlap (they'd otherwise cross-fade at the same screen position). */
+const INTRO_SPLIT = 0.5;
 /** Intro headline font size. Matches the hero's thin, centered treatment. */
 const INTRO_FONT_SIZE = 44;
 const INTRO_LINE_HEIGHT = 56;
@@ -924,8 +929,14 @@ export function WaterSurface() {
   // Animated Gaussian blur sigma for the Skia layer wrapping the water.
   const introBlur = useDerivedValue(() => intro.value * INTRO_MAX_BLUR);
   // Intro headline fades out; normal overlays fade in — in lockstep.
-  const introTextStyle = useAnimatedStyle(() => ({ opacity: intro.value }));
-  const normalOverlayStyle = useAnimatedStyle(() => ({ opacity: 1 - intro.value }));
+  // Staggered handoff so the two headlines never overlap: intro text fades out
+  // over intro 1→SPLIT, the experience fades in over SPLIT→0.
+  const introTextStyle = useAnimatedStyle(() => ({
+    opacity: Math.max(0, Math.min(1, (intro.value - INTRO_SPLIT) / (1 - INTRO_SPLIT))),
+  }));
+  const normalOverlayStyle = useAnimatedStyle(() => ({
+    opacity: Math.max(0, Math.min(1, (INTRO_SPLIT - intro.value) / INTRO_SPLIT)),
+  }));
 
   // Faint wash sweeping left->right across the pill as the current slide
   // progresses; the hard reset to 0 at each slide change comes from the worklet.
