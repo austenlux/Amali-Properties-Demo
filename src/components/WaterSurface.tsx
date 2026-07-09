@@ -223,7 +223,7 @@ const SCRIM_COLOR = 'rgba(0,0,0,0.6)';
 // The white transparent "AMÁLI / PROPERTIES" wordmark, centered near the top.
 
 /** Logo width as a fraction of screen width. */
-const LOGO_WIDTH_FRACTION = 0.58;
+const LOGO_WIDTH_FRACTION = 0.46;
 /** Wordmark aspect ratio (width : height) ≈ 2.94:1. Drives the fixed height. */
 const LOGO_ASPECT = 2.94;
 /** px below the safe-area top inset the logo (and equalizer) sit. */
