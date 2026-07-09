@@ -7,13 +7,16 @@
    handles them correctly. Scoped to this file only. */
 import {
   AlphaType,
+  Blur,
   Canvas,
   ColorType,
   Fill,
   FilterMode,
+  Group,
   ImageShader,
   LinearGradient,
   MipmapMode,
+  Paint,
   Rect,
   Shader,
   Skia,
@@ -33,10 +36,13 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  Easing,
   runOnJS,
   useAnimatedStyle,
+  useDerivedValue,
   useFrameCallback,
   useSharedValue,
+  withDelay,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -255,6 +261,27 @@ const EQ_FLAT_MS = 200;
 
 /** One-shot UI click volume (0..1). The ambient loop stays at full volume. */
 const CLICK_VOLUME = 0.25;
+
+// --- Launch intro animation --------------------------------------------------
+// On every app launch the whole water/background is Gaussian-blurred (Skia
+// layer blur) with a centered two-line headline over it; after a brief hold the
+// blur eases to zero and the intro text fades out AS the normal overlays fade
+// in — landing exactly on the current experience. Driven by ONE shared value.
+
+/** Intro headline, line 1 (hard break after this line). */
+const INTRO_LINE_1 = 'REDEFINING';
+/** Intro headline, line 2. */
+const INTRO_LINE_2 = 'LUXURY LIVING';
+/** How long the fully-blurred intro holds before the transition (ms). */
+const INTRO_HOLD_MS = 600;
+/** Ease-out duration for blur->0 + intro-text fade-out + overlays fade-in (ms). */
+const INTRO_FADE_MS = 1800;
+/** Peak Gaussian blur sigma (px) applied to the rendered water at t=0. */
+const INTRO_MAX_BLUR = 30;
+/** Intro headline font size. Matches the hero's thin, centered treatment. */
+const INTRO_FONT_SIZE = 44;
+const INTRO_LINE_HEIGHT = 56;
+const INTRO_LETTER_SPACING = 2;
 
 // ---------------------------------------------------------------------------
 // SkSL runtime shader.
@@ -878,6 +905,28 @@ export function WaterSurface() {
 
   const insets = useSafeAreaInsets();
 
+  // --- Launch intro -------------------------------------------------------
+  // ONE animation source: `intro` starts at 1 (fully blurred, headline shown)
+  // and eases to 0 on mount after a short hold. Everything else derives from it:
+  //   • blur sigma      = intro * INTRO_MAX_BLUR   (Skia layer Gaussian blur)
+  //   • intro-text opacity = intro                 (fades out)
+  //   • normal-overlay opacity = 1 - intro         (fades in)
+  // No per-frame setState — the effect kicks a single withTiming; the UI thread
+  // drives the rest through derived/animated styles.
+  const intro = useSharedValue(1);
+  useEffect(() => {
+    intro.value = withDelay(
+      INTRO_HOLD_MS,
+      withTiming(0, { duration: INTRO_FADE_MS, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [intro]);
+
+  // Animated Gaussian blur sigma for the Skia layer wrapping the water.
+  const introBlur = useDerivedValue(() => intro.value * INTRO_MAX_BLUR);
+  // Intro headline fades out; normal overlays fade in — in lockstep.
+  const introTextStyle = useAnimatedStyle(() => ({ opacity: intro.value }));
+  const normalOverlayStyle = useAnimatedStyle(() => ({ opacity: 1 - intro.value }));
+
   // Faint wash sweeping left->right across the pill as the current slide
   // progresses; the hard reset to 0 at each slide change comes from the worklet.
   const sweepStyle = useAnimatedStyle(() => ({
@@ -912,31 +961,37 @@ export function WaterSurface() {
     <View style={styles.root}>
       <GestureDetector gesture={pan}>
         <Canvas style={styles.canvas}>
-          <Fill>
-            <Shader source={source} uniforms={uniforms}>
-              <ImageShader
-                image={currentImg}
-                fit="cover"
-                rect={fullScreenRect}
-                tx="clamp"
-                ty="clamp"
-              />
-              <ImageShader
-                image={nextImg}
-                fit="cover"
-                rect={fullScreenRect}
-                tx="clamp"
-                ty="clamp"
-              />
-              <ImageShader
-                image={heightImage}
-                fit="none"
-                tx="clamp"
-                ty="clamp"
-                sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.None }}
-              />
-            </Shader>
-          </Fill>
+          {/* The whole water is rendered into an offscreen layer whose Paint
+              carries an animated Gaussian <Blur> image filter, so the RENDERED
+              water (sim + rotation, untouched underneath) is blurred as one — the
+              launch-intro blur. `introBlur` eases 30->0, clearing the water. */}
+          <Group layer={<Paint><Blur blur={introBlur} /></Paint>}>
+            <Fill>
+              <Shader source={source} uniforms={uniforms}>
+                <ImageShader
+                  image={currentImg}
+                  fit="cover"
+                  rect={fullScreenRect}
+                  tx="clamp"
+                  ty="clamp"
+                />
+                <ImageShader
+                  image={nextImg}
+                  fit="cover"
+                  rect={fullScreenRect}
+                  tx="clamp"
+                  ty="clamp"
+                />
+                <ImageShader
+                  image={heightImage}
+                  fit="none"
+                  tx="clamp"
+                  ty="clamp"
+                  sampling={{ filter: FilterMode.Linear, mipmap: MipmapMode.None }}
+                />
+              </Shader>
+            </Fill>
+          </Group>
         </Canvas>
       </GestureDetector>
 
@@ -945,8 +1000,13 @@ export function WaterSurface() {
           through to the water Canvas everywhere EXCEPT on the few interactive
           controls (the tabs + the equalizer button), which catch their own
           touches. Every non-interactive child is pointerEvents="none" so drags
-          over them still ripple the water. */}
-      <View style={styles.overlay} pointerEvents="box-none">
+          over them still ripple the water. Its opacity fades 0->1 as the intro
+          clears; "box-none" is preserved so, once faded in, the water stays
+          touchable and only the controls catch — exactly as before the intro. */}
+      <Animated.View
+        style={[styles.overlay, normalOverlayStyle]}
+        pointerEvents="box-none"
+      >
         {/* Bottom gradient scrim (Skia) so the bar reads over any image. */}
         <Canvas style={styles.scrim} pointerEvents="none">
           <Rect x={0} y={0} width={width} height={SCRIM_HEIGHT}>
@@ -1021,7 +1081,21 @@ export function WaterSurface() {
             {SIDE_LABEL_RIGHT}
           </Text>
         </View>
-      </View>
+      </Animated.View>
+
+      {/* Launch-intro headline: centered like the hero, white/thin with the same
+          dark halo, over the blurred water. Opacity fades 1->0 as the intro
+          clears. pointerEvents="none" so it never intercepts touches. */}
+      <Animated.View
+        style={[styles.introWrap, introTextStyle]}
+        pointerEvents="none"
+      >
+        <Text style={styles.introText}>
+          {INTRO_LINE_1}
+          {'\n'}
+          {INTRO_LINE_2}
+        </Text>
+      </Animated.View>
     </View>
   );
 }
@@ -1102,6 +1176,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     // Dark halo so the headline stays readable over bright image areas (same
     // approach as the bottom bar labels).
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
+  },
+  // Launch-intro headline — centered on screen over the blurred water.
+  introWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  introText: {
+    color: '#FFFFFF',
+    fontSize: INTRO_FONT_SIZE,
+    lineHeight: INTRO_LINE_HEIGHT,
+    letterSpacing: INTRO_LETTER_SPACING,
+    fontWeight: '300',
+    textAlign: 'center',
+    // Same dark halo the hero uses, for legibility over bright/blurred imagery.
     textShadowColor: 'rgba(0,0,0,0.55)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 10,
